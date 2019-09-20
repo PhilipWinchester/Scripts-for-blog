@@ -1,13 +1,4 @@
-# Things to look at: Why we get an error when we set larger epsilon! have checked and the epsilon stuff does work, still not sure why error when large one
-
-# Should write about the mod stuff and about how he had a bunch of wrong stuff in paper
-
-#Every time a run it, i could save the results in an excel spreadsheet maybe?
-
-
-
 library(dplyr)
-library("ggplot2")
 
 NMod<- function(Vector,n=1){
   # Takes vector and returns n*mod
@@ -18,8 +9,7 @@ NMod<- function(Vector,n=1){
   return((NMod)^(0.5)*n)
 }
 
-
-# Read in dataframe with results from last three EPL and Championship results
+# Read in dataframe with results from last three EPL and Championship seasons
 Match_Data_Original <- read.csv("Match Data.csv", header = TRUE, stringsAsFactors=FALSE) 
 
 # Todays date
@@ -46,7 +36,7 @@ phi <- function(t, epsilon = 0.0019){
 }
 
 MatchLL <- function(x,y,ai, aj, bi, bj, gamma, rho, t){
-  # A function which calcualtes the log likelihood of some game
+  # A function which calculates the log likelihood of some game
   lambda <- ai*bj*gamma
   mu <- aj*bi
   return(phi(t)*sum(log(tau(x, y, lambda, mu, rho)) - lambda + x*log(lambda) - mu + y*log(mu)))
@@ -54,7 +44,7 @@ MatchLL <- function(x,y,ai, aj, bi, bj, gamma, rho, t){
 
 
 LL <- function(Match_Data, Parameters){
-  # Function which calclulates the LL for all the games
+  # Function which calculates the LL for all the games
   LL <- 0 
   
   Teams <- sort(unique(Match_Data$HomeTeam))
@@ -322,15 +312,13 @@ NormalisingTheGradientVector <- function(GradientVector,n){
 
   return((GradientVector - Normaliser)/NMod(GradientVector - Normaliser,n)) 
 
-
 }
 
-
-# Have tried to not devide by the NMod stuff. not sure if it works. still issues with not beeing able to find a good value for gamma.
-# Will have to try to optemise it individually. have done this succesfully, but does not seem to change much. probs is smaller than expected.
-
 Optimise <- function(Match_Data, Max = 100, m = 10){
-  # Takes some match data and returns 
+  # Takes some match data and returns returns the parameters which maximise the log liklihood function.
+  # This is done with a gradient ascent alogorithm 
+  # The default maximum step size is is 1/100, can be changed in the Max variable
+  # The default is that we start with a step size of 1/10, which then goes to 1/20 etc... this can be changed in m
   
   Teams <- sort(unique(Match_Data$HomeTeam))
   
@@ -346,7 +334,7 @@ Optimise <- function(Match_Data, Max = 100, m = 10){
   
   
   count <- 0
-  # Doing itertaitons until we have added just one of the smallets gradient vecor we weant to add
+  # Doing itertaitons until we have added just one of the smallets gradient vecor we want to add
   while(Step <= Max){
     
     count <- count + 1
@@ -409,16 +397,9 @@ round_df <- function(x, digits) {
 Results <- Optimise(Match_Data, Max = 200) # If we run this, we will se that all params but gamma are in good shape. could have 2nd bit where we optemise thi
 Results <- round_df(Results,2)
 
-
-
 # Plotting curve that shows different epsilons 
 curve(exp(-0.001*x), xlim = c(0, 1000), ylim = c(0,1), n = 1001, col = "green", xlab = "t", ylab = "φ(t)")
 curve(exp(-0.002*x), xlim = c(0, 1000), n = 1001, col = "orange", add = TRUE)
 curve(exp(-0.003*x), xlim = c(0, 1000), n = 1001, col = "red", add = TRUE)
 legend("topright", c("ε = 0.001", "ε = 0.002","ε = 0.003"), col = c("green", "orange", "red"), pch=16)
-
-NMod(c(1,2,4)/NMod(c(1,2,4),50),1)
-
-NormalisingTheGradientVector(c(1,2),2)
-# Can do a match probabilty matrxi as the one done by dishee in the coles post 
 
