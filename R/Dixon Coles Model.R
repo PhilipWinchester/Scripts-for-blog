@@ -1,4 +1,6 @@
+setwd("~/Desktop/PhilipWinchester.github.io/Data")
 library(dplyr)
+library(readxl)
 
 NMod<- function(Vector,n=1){
   # Takes vector and returns n*mod
@@ -314,10 +316,22 @@ NormalisingTheGradientVector <- function(GradientVector,n){
 
 }
 
-Optimise <- function(Match_Data, Max = 100, m = 10){
+round_df <- function(x, digits, Omit = 1) {
+  # round all numeric variables
+  # x: data frame 
+  # digits: number of digits to round
+  # Omit is the number of columns we ignare at the start of the DF, usually these are non numeric entries
+  
+  for(i in (1+Omit):ncol(x)){
+    x[i] <-  round(x[i], digits)
+  }
+  return(x)
+}
+
+Optimise <- function(Match_Data, Max = 200, m = 10){
   # Takes some match data and returns returns the parameters which maximise the log liklihood function.
   # This is done with a gradient ascent alogorithm 
-  # The default maximum step size is is 1/100, can be changed in the Max variable
+  # The default maximum step size is is 1/200, can be changed in the Max variable
   # The default is that we start with a step size of 1/10, which then goes to 1/20 etc... this can be changed in m
   
   Teams <- sort(unique(Match_Data$HomeTeam))
@@ -374,32 +388,187 @@ Optimise <- function(Match_Data, Max = 100, m = 10){
   Beta <- Parameters[(length(Teams)+1):(length(Teams)*2)]
   Gamma <- Parameters[length(Teams)*2+1]
   Rho <- Parameters[length(Teams)*2+2]
-  Results <- data.frame(Teams, Alpha, Beta, Gamma, Rho)
+  Results <- data.frame(Teams, Alpha, Beta, Gamma, Rho) #%>% mutate_if(is.factor, as.character)
   
   
-  return(Results)
+  return(round_df(Results,2))
   
 }
-
-round_df <- function(x, digits) {
-  # round all numeric variables
-  # x: data frame 
-  # digits: number of digits to round
-  
-  for(i in 2:ncol(x)){
-    x[i] <-  round(x[i], digits)
-  }
-  return(x)
-}
-
 
 # prints
 Results <- Optimise(Match_Data, Max = 200) # If we run this, we will se that all params but gamma are in good shape. could have 2nd bit where we optemise thi
-Results <- round_df(Results,2)
 
 # Plotting curve that shows different epsilons 
 curve(exp(-0.001*x), xlim = c(0, 1000), ylim = c(0,1), n = 1001, col = "green", xlab = "t", ylab = "φ(t)")
 curve(exp(-0.002*x), xlim = c(0, 1000), n = 1001, col = "orange", add = TRUE)
 curve(exp(-0.003*x), xlim = c(0, 1000), n = 1001, col = "red", add = TRUE)
 legend("topright", c("ε = 0.001", "ε = 0.002","ε = 0.003"), col = c("green", "orange", "red"), pch=16)
+
+# -----------------------------------------
+
+SimulateMatch <- function(HomeTeam, AwayTeam, Parameters, Max = 10) {
+  # Function which takes two teams and returns a scoreline probability matrix.
+  # Parameters is the set of parameters we have after running the Optimise function
+  # Max is the maximum number of goals we assume any team can score in a game.
+  
+  HomeIndex <- match(HomeTeam, Parameters$Teams)
+  AwayIndex <- match(AwayTeam, Parameters$Teams)
+  
+  # Finding relevant Parameters
+  ai <- Parameters$Alpha[HomeIndex]
+  aj <- Parameters$Alpha[AwayIndex]
+  bi <- Parameters$Beta[HomeIndex]
+  bj <- Parameters$Beta[AwayIndex]
+  gamma <- Parameters$Gamma[1]
+  rho <- Parameters$Rho[1]
+  
+  lambda <- ai*bj*gamma
+  mu <- aj*bi
+  
+  # Making the scoreline probability matrix, without the tau function at first
+  Result <- dpois(0:Max, lambda) %o% dpois(0:Max, mu)
+  
+  # Adding the tau function
+  Result[1,1] <- Result[1,1]*(1-lambda*mu*rho)
+  Result[2,1] <- Result[2,1]*(1+mu*rho)
+  Result[1,2] <- Result[1,2]*(1+lambda*rho)
+  Result[2,2] <- Result[2,2]*(1-rho)
+  
+  return(Result)
+  
+}
+
+StatFinder <- function(ScorelineProbabilityMatrix){
+  # Takes a ScorelineProbabilityMatrix as the one procuded by SimulateMatch and returns a vecttor with:
+  # Home team expected goals
+  # Away team expected goals
+  # Home team prob of clean sheet 
+  # Away team prob of clean sheet 
+  
+  Max <- nrow(ScorelineProbabilityMatrix)-1
+  
+  HTExpGoals <- sum(rowSums(ScorelineProbabilityMatrix)*0:Max)
+  ATExpGoals <- sum(colSums(ScorelineProbabilityMatrix)*0:Max)
+  HTCSProb <- colSums(ScorelineProbabilityMatrix)[1]
+  ATCSProb <- rowSums(ScorelineProbabilityMatrix)[1]
+  
+  return(c(HTExpGoals,ATExpGoals, HTCSProb,ATCSProb))
+  
+}
+
+# Read in Future Fuxtures, make it a df and extract columns we want
+FutureFixtures <- read_excel("Future Games.xls")
+FutureFixtures <- as.data.frame(FutureFixtures) %>% select(HOME_TEAM, AWAY_TEAM,GW)
+
+Predictions <- function(Parameters, FutureFixtures){
+  # Function which takes Paremeters as the ones produced by the optimize fundtion and a df with future fixtures
+  # Adds four columns to df
+  # Home team expected goals
+  # Away team expected goals
+  # Home team prob of clean sheet 
+  # Away team prob of clean sheet 
+  
+  # Settting up the matrix where we will save the stats
+  Matrix <- StatFinder(SimulateMatch(FutureFixtures$HOME_TEAM[1], FutureFixtures$AWAY_TEAM[1], Parameters))
+  
+  # Adding to the matrix
+  for(i in 2:nrow(FutureFixtures)){
+    Matrix <- rbind(Matrix, StatFinder(SimulateMatch(FutureFixtures$HOME_TEAM[i], FutureFixtures$AWAY_TEAM[i], Parameters)))
+  }
+  
+  Result <- cbind(FutureFixtures,Matrix)
+  rownames(Result) <- c()
+  
+  # Changing collumn names
+  colnames(Result)[4] <- "HTExpGoals"
+  colnames(Result)[5] <- "ATExpGoals"
+  colnames(Result)[6] <- "HTCSProb"
+  colnames(Result)[7] <- "ATCSProb"
+  
+  return(round_df(Result, digits = 2, 3))
+  
+}
+
+Predictions <- Predictions(Results, FutureFixtures)
+
+
+
+RowMaker <- function(Team, Predictions, ExpGoals = TRUE){
+  
+  
+  # Findin the first gameweek in our predictions df
+  GWMin <- min(Predictions$GW)
+  
+  
+  Pred <- rep(0, 38-GWMin+1)
+  GW <- rep(0, 38-GWMin+1)
+  
+  # Deciding which columns we want to look at for predictions
+  if(ExpGoals){
+    HomePosition <- 4 # should not need to hard code this really...
+    AwayPosition <-  5
+  } else {
+    HomePosition <- 6
+    AwayPosition <- 7
+  }
+  
+  
+  
+  Count <-1
+  # Checking the home team column
+  for(i in 1:nrow(Predictions)){
+    if(Team == Predictions$HOME_TEAM[i]){
+      Pred[Count] <- Predictions[i,HomePosition]
+      GW[Count] <- Predictions$GW[i]
+      Count <- Count + 1
+    }
+  }
+    
+    # Checking the away team column
+    for(i in 1:nrow(Predictions)){
+      if(Team == Predictions$AWAY_TEAM[i]){
+        Pred[Count] <- Predictions[i,AwayPosition]
+        GW[Count] <- Predictions$GW[i]
+        Count <- Count + 1
+      }
+    }
+      
+    # putting in right order  
+    Output <- rep(0, 38-GWMin+1)
+    for(i in 1:length(Output)){
+      Output[GW[i]-GWMin+1] <- Pred[i]
+    } 
+    
+    return(append(Output, Team, 0))
+  
+}
+
+
+
+SSMaker <- function(Predictions, Teams, ExpGoals = TRUE){
+  # Function which takes our predictions df, the teams in our datase and returns the predictions in row format 
+  
+  # Findin the first gameweek in our predictions df
+  GWMin <- min(Predictions$GW)
+  
+  # Making the columns of our output df
+  ColumnNames <- rep(0,1+38-GWMin+1)
+  ColumnNames[1] <- "Teams"
+  for(k in 2:length(ColumnNames)){
+    ColumnNames[k] <- paste("GW", as.character(GWMin+k-2), sep = " ")
+  }
+  
+  Output <- ColumnNames
+  
+  for(i in 1:length(Teams)){
+    Output <- rbind(Output,RowMaker(Teams[i], Predictions, ExpGoals))
+  }
+  
+  return(Output)
+  
+}
+
+
+write.csv(SSMaker(Predictions, Teams, ExpGoals = TRUE), file = "Goals.csv")
+write.csv(SSMaker(Predictions, Teams, ExpGoals = FALSE), file = "CS.csv")
 
